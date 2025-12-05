@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDatabase, COLLECTIONS } from './lib/mongodb.js';
-import { Product, HeroSection } from '../types.js';
+import { getDatabase, COLLECTIONS } from './lib/mongodb';
+import { Product, HeroSection } from './lib/types';
 
 // Simple auth check
 function isAuthenticated(req: VercelRequest): boolean {

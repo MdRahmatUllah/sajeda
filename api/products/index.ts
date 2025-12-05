@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getDatabase, COLLECTIONS } from '../lib/mongodb.js';
-import { Product } from '../../types.js';
+import { getDatabase, COLLECTIONS } from '../lib/mongodb';
+import { Product } from '../lib/types';
 import { ObjectId } from 'mongodb';
 
 // Simple auth check for write operations
