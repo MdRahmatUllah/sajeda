@@ -44,11 +44,13 @@ const Admin: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'products' | 'content'>('products');
 
   // Product Logic
-  const { products, addProduct, updateProduct, deleteProduct } = useProducts();
+  const { products, isLoading: productsLoading, error: productsError, addProduct, updateProduct, deleteProduct, refreshProducts } = useProducts();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<Product>(initialProduct);
   const [imageInput, setImageInput] = useState('');
   const [scentInput, setScentInput] = useState('');
+  const [productSaving, setProductSaving] = useState(false);
+  const [productError, setProductError] = useState<string | null>(null);
 
   // AI Assistant State
   const [inputMode, setInputMode] = useState<'manual' | 'ai'>('manual');
@@ -60,10 +62,12 @@ const Admin: React.FC = () => {
   const [aiFieldsApplied, setAiFieldsApplied] = useState(false);
 
   // Content Logic - Multiple Hero Sections
-  const { heroContent, heroSections, activeHeroSection, addHeroSection, updateHeroSection, deleteHeroSection, activateHeroSection, resetHeroContent } = useContent();
+  const { heroContent, heroSections, activeHeroSection, isLoading: heroLoading, error: heroError, addHeroSection, updateHeroSection, deleteHeroSection, activateHeroSection, resetHeroContent } = useContent();
   const [editingHeroId, setEditingHeroId] = useState<string | null>(null);
   const [heroForm, setHeroForm] = useState<HeroSection | null>(null);
   const [isCreatingHero, setIsCreatingHero] = useState(false);
+  const [heroSaving, setHeroSaving] = useState(false);
+  const [heroActionError, setHeroActionError] = useState<string | null>(null);
 
   // Initial hero form for creating new hero sections
   const initialHeroForm: Omit<HeroSection, 'id' | 'createdAt' | 'isActive'> = {
@@ -134,45 +138,61 @@ const Admin: React.FC = () => {
     setHeroForm(null);
   };
 
-  const handleHeroSubmit = (e: React.FormEvent) => {
+  const handleHeroSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!heroForm) return;
 
-    if (isCreatingHero) {
-      addHeroSection({
-        name: heroForm.name,
-        badge: heroForm.badge,
-        titleLine1: heroForm.titleLine1,
-        titleAccent: heroForm.titleAccent,
-        description: heroForm.description,
-        backgroundImageUrl: heroForm.backgroundImageUrl,
-        primaryCtaText: heroForm.primaryCtaText,
-        primaryCtaLink: heroForm.primaryCtaLink,
-        secondaryCtaText: heroForm.secondaryCtaText,
-        secondaryCtaLink: heroForm.secondaryCtaLink
-      });
-      alert('Hero section created successfully!');
-    } else if (editingHeroId) {
-      updateHeroSection(heroForm);
-      alert('Hero section updated successfully!');
-    }
+    setHeroSaving(true);
+    setHeroActionError(null);
 
-    handleCancelHeroEdit();
+    try {
+      if (isCreatingHero) {
+        await addHeroSection({
+          name: heroForm.name,
+          badge: heroForm.badge,
+          titleLine1: heroForm.titleLine1,
+          titleAccent: heroForm.titleAccent,
+          description: heroForm.description,
+          backgroundImageUrl: heroForm.backgroundImageUrl,
+          primaryCtaText: heroForm.primaryCtaText,
+          primaryCtaLink: heroForm.primaryCtaLink,
+          secondaryCtaText: heroForm.secondaryCtaText,
+          secondaryCtaLink: heroForm.secondaryCtaLink
+        });
+        alert('Hero section created successfully!');
+      } else if (editingHeroId) {
+        await updateHeroSection(heroForm);
+        alert('Hero section updated successfully!');
+      }
+      handleCancelHeroEdit();
+    } catch (err) {
+      setHeroActionError(err instanceof Error ? err.message : 'Failed to save hero section');
+    } finally {
+      setHeroSaving(false);
+    }
   };
 
-  const handleDeleteHero = (id: string) => {
+  const handleDeleteHero = async (id: string) => {
     const hero = heroSections.find(h => h.id === id);
     if (hero?.isActive) {
       alert('Cannot delete the active hero section. Please activate another hero first.');
       return;
     }
     if (window.confirm('Are you sure you want to delete this hero section?')) {
-      deleteHeroSection(id);
+      try {
+        await deleteHeroSection(id);
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to delete hero section');
+      }
     }
   };
 
-  const handleActivateHero = (id: string) => {
-    activateHeroSection(id);
+  const handleActivateHero = async (id: string) => {
+    try {
+      await activateHeroSection(id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to activate hero section');
+    }
   };
 
   // Reset Product Form when switching modes
@@ -243,8 +263,11 @@ const Admin: React.FC = () => {
   };
 
   // Handlers - Product
-  const handleProductSubmit = (e: React.FormEvent) => {
+  const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setProductSaving(true);
+    setProductError(null);
+
     const processedData: Product = {
       ...formData,
       images: imageInput.split('\n').map(s => s.trim()).filter(Boolean),
@@ -252,23 +275,34 @@ const Admin: React.FC = () => {
       price: Number(formData.price),
       salePrice: formData.salePrice ? Number(formData.salePrice) : undefined
     };
-    if (editingId) {
-      updateProduct(processedData);
-    } else {
-      addProduct({ ...processedData, id: Date.now().toString() });
+
+    try {
+      if (editingId) {
+        await updateProduct(processedData);
+      } else {
+        await addProduct({ ...processedData, id: Date.now().toString() });
+      }
+      setEditingId(null);
+      // Reset AI state after submission
+      setAiSuggestions(null);
+      setAiDescription('');
+      setAiFieldsApplied(false);
+      alert(editingId ? 'Product updated!' : 'Product created!');
+    } catch (err) {
+      setProductError(err instanceof Error ? err.message : 'Failed to save product');
+    } finally {
+      setProductSaving(false);
     }
-    setEditingId(null);
-    // Reset AI state after submission
-    setAiSuggestions(null);
-    setAiDescription('');
-    setAiFieldsApplied(false);
-    alert(editingId ? 'Product updated!' : 'Product created!');
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this product?')) {
-      deleteProduct(id);
-      if (editingId === id) setEditingId(null);
+      try {
+        await deleteProduct(id);
+        if (editingId === id) setEditingId(null);
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to delete product');
+      }
     }
   };
 
@@ -445,7 +479,16 @@ const Admin: React.FC = () => {
                   <h2 className="font-bold text-stone-700">All Products ({products.length})</h2>
                 </div>
                 <div className="overflow-y-auto flex-1 p-4 space-y-3">
-                  {products.map(product => {
+                  {productsLoading ? (
+                    <div className="flex items-center justify-center h-40">
+                      <Loader2 className="w-8 h-8 animate-spin text-rose-400" />
+                    </div>
+                  ) : productsError ? (
+                    <div className="flex flex-col items-center justify-center h-40 text-red-500">
+                      <AlertCircle className="w-8 h-8 mb-2" />
+                      <p className="text-sm">{productsError}</p>
+                    </div>
+                  ) : products.map(product => {
                       const onSale = product.salePrice && product.salePrice < product.price;
                       return (
                         <div 
@@ -489,6 +532,15 @@ const Admin: React.FC = () => {
 
               {/* Product Form */}
               <div className="lg:col-span-2 bg-white rounded-xl shadow-sm p-6 md:p-8 h-fit">
+                {productError && (
+                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700">
+                    <AlertCircle size={20} />
+                    <span>{productError}</span>
+                    <button onClick={() => setProductError(null)} className="ml-auto text-red-500 hover:text-red-700">
+                      <X size={18} />
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="font-serif text-2xl text-stone-900">
                     {editingId ? 'Edit Product' : 'Create New Product'}
@@ -864,9 +916,17 @@ const Admin: React.FC = () => {
                     )}
                     <button
                       type="submit"
-                      className="px-8 py-3 bg-stone-900 text-white font-medium rounded-lg hover:bg-stone-800 transition-colors shadow-sm"
+                      disabled={productSaving}
+                      className="px-8 py-3 bg-stone-900 text-white font-medium rounded-lg hover:bg-stone-800 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
-                      {editingId ? 'Save Changes' : 'Create Product'}
+                      {productSaving ? (
+                        <>
+                          <Loader2 size={18} className="animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        editingId ? 'Save Changes' : 'Create Product'
+                      )}
                     </button>
                   </div>
                 </form>
@@ -901,6 +961,20 @@ const Admin: React.FC = () => {
             </div>
 
             {/* Hero Sections Grid */}
+            {heroLoading ? (
+              <div className="flex items-center justify-center h-64">
+                <div className="text-center">
+                  <Loader2 className="w-10 h-10 animate-spin text-rose-400 mx-auto mb-3" />
+                  <p className="text-stone-500">Loading hero sections...</p>
+                </div>
+              </div>
+            ) : heroError ? (
+              <div className="flex flex-col items-center justify-center h-64 text-red-500">
+                <AlertCircle className="w-10 h-10 mb-3" />
+                <p className="text-lg font-medium">Failed to load hero sections</p>
+                <p className="text-sm">{heroError}</p>
+              </div>
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {heroSections.map((hero) => (
                 <div
@@ -973,6 +1047,7 @@ const Admin: React.FC = () => {
                 </div>
               ))}
             </div>
+            )}
 
             {/* Edit/Create Form Modal */}
             {(editingHeroId || isCreatingHero) && heroForm && (
@@ -993,6 +1068,15 @@ const Admin: React.FC = () => {
 
                   {/* Modal Form */}
                   <form onSubmit={handleHeroSubmit} className="p-6 space-y-6">
+                    {heroActionError && (
+                      <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3 text-red-700">
+                        <AlertCircle size={20} />
+                        <span>{heroActionError}</span>
+                        <button type="button" onClick={() => setHeroActionError(null)} className="ml-auto text-red-500 hover:text-red-700">
+                          <X size={18} />
+                        </button>
+                      </div>
+                    )}
                     {/* Hero Name */}
                     <div>
                       <label className="block text-sm font-medium text-stone-700 mb-1">
@@ -1137,9 +1221,17 @@ const Admin: React.FC = () => {
                       </button>
                       <button
                         type="submit"
-                        className="px-8 py-2.5 bg-stone-900 text-white font-medium rounded-lg hover:bg-stone-800 transition-colors shadow-sm"
+                        disabled={heroSaving}
+                        className="px-8 py-2.5 bg-stone-900 text-white font-medium rounded-lg hover:bg-stone-800 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                       >
-                        {isCreatingHero ? 'Create Hero Section' : 'Save Changes'}
+                        {heroSaving ? (
+                          <>
+                            <Loader2 size={16} className="animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          isCreatingHero ? 'Create Hero Section' : 'Save Changes'
+                        )}
                       </button>
                     </div>
                   </form>

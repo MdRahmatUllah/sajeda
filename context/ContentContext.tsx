@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { HeroContent, HeroSection } from '../types';
+import { heroSectionsApi, seedApi } from '../utils/api';
 
-// Default hero section that is always available
+// Default hero section (fallback)
 const DEFAULT_HERO_SECTION: HeroSection = {
   id: 'default-hero',
   name: 'Default Hero',
@@ -18,56 +19,54 @@ const DEFAULT_HERO_SECTION: HeroSection = {
   secondaryCtaLink: "/about"
 };
 
-const STORAGE_KEY = 'shazeda_hero_sections';
-
 interface ContentContextType {
-  // Active hero content for the homepage
   heroContent: HeroContent;
-  // All hero sections
   heroSections: HeroSection[];
-  // Get the active hero section
   activeHeroSection: HeroSection | null;
-  // CRUD operations
-  addHeroSection: (section: Omit<HeroSection, 'id' | 'createdAt' | 'isActive'>) => void;
-  updateHeroSection: (section: HeroSection) => void;
-  deleteHeroSection: (id: string) => boolean;
-  // Activation
-  activateHeroSection: (id: string) => void;
-  // Legacy support
-  updateHeroContent: (content: HeroContent) => void;
-  resetHeroContent: () => void;
+  isLoading: boolean;
+  error: string | null;
+  addHeroSection: (section: Omit<HeroSection, 'id' | 'createdAt' | 'isActive'>) => Promise<void>;
+  updateHeroSection: (section: HeroSection) => Promise<void>;
+  deleteHeroSection: (id: string) => Promise<boolean>;
+  activateHeroSection: (id: string) => Promise<void>;
+  updateHeroContent: (content: HeroContent) => Promise<void>;
+  resetHeroContent: () => Promise<void>;
+  refreshHeroSections: () => Promise<void>;
 }
 
 const ContentContext = createContext<ContentContextType | undefined>(undefined);
 
 export const ContentProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [heroSections, setHeroSections] = useState<HeroSection[]>(() => {
+  const [heroSections, setHeroSections] = useState<HeroSection[]>([DEFAULT_HERO_SECTION]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch hero sections from API
+  const fetchHeroSections = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Ensure at least one section is active
-        if (!parsed.some((s: HeroSection) => s.isActive) && parsed.length > 0) {
-          parsed[0].isActive = true;
-        }
-        return parsed;
+      const data = await heroSectionsApi.getAll();
+      if (data.length > 0) {
+        setHeroSections(data);
+      } else {
+        setHeroSections([DEFAULT_HERO_SECTION]);
       }
-      return [DEFAULT_HERO_SECTION];
-    } catch (e) {
-      console.error("Failed to load hero sections from local storage", e);
-      return [DEFAULT_HERO_SECTION];
+    } catch (err) {
+      console.error('Failed to fetch hero sections:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load hero sections');
+      setHeroSections([DEFAULT_HERO_SECTION]);
+    } finally {
+      setIsLoading(false);
     }
-  });
+  }, []);
 
-  // Persist to localStorage whenever sections change
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(heroSections));
-  }, [heroSections]);
+    fetchHeroSections();
+  }, [fetchHeroSections]);
 
-  // Get the active hero section
   const activeHeroSection = heroSections.find((s: HeroSection) => s.isActive) || heroSections[0] || null;
 
-  // Get hero content (for backward compatibility with homepage)
   const heroContent: HeroContent = activeHeroSection ? {
     badge: activeHeroSection.badge,
     titleLine1: activeHeroSection.titleLine1,
@@ -90,53 +89,75 @@ export const ContentProvider: React.FC<{ children: ReactNode }> = ({ children })
     secondaryCtaLink: DEFAULT_HERO_SECTION.secondaryCtaLink,
   };
 
-  // Add a new hero section
-  const addHeroSection = (section: Omit<HeroSection, 'id' | 'createdAt' | 'isActive'>) => {
-    const newSection: HeroSection = {
-      ...section,
-      id: `hero-${Date.now()}`,
-      createdAt: Date.now(),
-      isActive: false,
-    };
-    setHeroSections(prev => [...prev, newSection]);
-  };
-
-  // Update an existing hero section
-  const updateHeroSection = (section: HeroSection) => {
-    setHeroSections(prev => prev.map(s => s.id === section.id ? section : s));
-  };
-
-  // Delete a hero section (cannot delete active section)
-  const deleteHeroSection = (id: string): boolean => {
-    const section = heroSections.find(s => s.id === id);
-    if (!section || section.isActive) {
-      return false; // Cannot delete active section
-    }
-    setHeroSections(prev => prev.filter(s => s.id !== id));
-    return true;
-  };
-
-  // Activate a hero section (only one can be active at a time)
-  const activateHeroSection = (id: string) => {
-    setHeroSections(prev => prev.map(s => ({
-      ...s,
-      isActive: s.id === id
-    })));
-  };
-
-  // Legacy: Update hero content (updates the active section)
-  const updateHeroContent = (content: HeroContent) => {
-    if (activeHeroSection) {
-      updateHeroSection({
-        ...activeHeroSection,
-        ...content
+  const addHeroSection = async (section: Omit<HeroSection, 'id' | 'createdAt' | 'isActive'>) => {
+    try {
+      const newSection = await heroSectionsApi.create({
+        ...section,
+        createdAt: Date.now(),
+        isActive: false
       });
+      setHeroSections((prev: HeroSection[]) => [...prev, newSection]);
+    } catch (err) {
+      console.error('Failed to add hero section:', err);
+      throw err;
     }
   };
 
-  // Reset to default hero section
-  const resetHeroContent = () => {
-    setHeroSections([{ ...DEFAULT_HERO_SECTION, createdAt: Date.now() }]);
+  const updateHeroSection = async (section: HeroSection) => {
+    try {
+      const updated = await heroSectionsApi.update(section);
+      setHeroSections((prev: HeroSection[]) => prev.map((s: HeroSection) => s.id === updated.id ? updated : s));
+    } catch (err) {
+      console.error('Failed to update hero section:', err);
+      throw err;
+    }
+  };
+
+  const deleteHeroSection = async (id: string): Promise<boolean> => {
+    const section = heroSections.find((s: HeroSection) => s.id === id);
+    if (!section || section.isActive) {
+      return false;
+    }
+    try {
+      await heroSectionsApi.delete(id);
+      setHeroSections((prev: HeroSection[]) => prev.filter((s: HeroSection) => s.id !== id));
+      return true;
+    } catch (err) {
+      console.error('Failed to delete hero section:', err);
+      throw err;
+    }
+  };
+
+  const activateHeroSection = async (id: string) => {
+    try {
+      const result = await heroSectionsApi.activate(id);
+      if (result.heroSections) {
+        setHeroSections(result.heroSections);
+      }
+    } catch (err) {
+      console.error('Failed to activate hero section:', err);
+      throw err;
+    }
+  };
+
+  const updateHeroContent = async (content: HeroContent) => {
+    if (activeHeroSection) {
+      await updateHeroSection({ ...activeHeroSection, ...content });
+    }
+  };
+
+  const resetHeroContent = async () => {
+    try {
+      await seedApi.seed();
+      await fetchHeroSections();
+    } catch (err) {
+      console.error('Failed to reset hero content:', err);
+      throw err;
+    }
+  };
+
+  const refreshHeroSections = async () => {
+    await fetchHeroSections();
   };
 
   return (
@@ -144,12 +165,15 @@ export const ContentProvider: React.FC<{ children: ReactNode }> = ({ children })
       heroContent,
       heroSections,
       activeHeroSection,
+      isLoading,
+      error,
       addHeroSection,
       updateHeroSection,
       deleteHeroSection,
       activateHeroSection,
       updateHeroContent,
-      resetHeroContent
+      resetHeroContent,
+      refreshHeroSections
     }}>
       {children}
     </ContentContext.Provider>
