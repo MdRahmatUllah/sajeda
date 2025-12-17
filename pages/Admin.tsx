@@ -233,7 +233,7 @@ const Admin: React.FC = () => {
       setAiSuggestions(result.data);
       setSelectedNameIndex(0);
       setAiFieldsApplied(false);
-    } else {
+    } else if (!result.success) {
       setAiError(result.error.message);
     }
 
